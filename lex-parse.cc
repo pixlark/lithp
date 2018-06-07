@@ -153,7 +153,9 @@ void AST_Node::init(AST_Type type)
 {
 	this->type = type;
 	next = NULL;
-	debug_id = next_debug_id();
+	debug_id     = next_debug_id();
+	next_nil_id  = next_debug_id();
+	child_nil_id = next_debug_id();
 	switch (type) {
 	case AST_LIST:
 		list_head = NULL;
@@ -215,7 +217,24 @@ void AST_Node::graph_viz_repr(FILE * file)
 	defer { group_ids.dealloc(); };
 	AST_Node * iter = this;
 	while (iter != NULL) {
-		{
+		group_ids.push(iter->debug_id);
+		
+		// Declare nil if the next member of the list is nil
+		if (iter->next == NULL) {
+			group_ids.push(iter->next_nil_id);
+			char buffer[512];
+			sprintf(buffer, "\"%d\" [label=\"NIL\"]\n", iter->next_nil_id);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		}
+		// Declare nil if this is a list and the child is nil
+		if (iter->type == AST_LIST && iter->list_head == NULL) {
+			char buffer[512];
+			sprintf(buffer, "\"%d\" [label=\"NIL\"]\n", iter->child_nil_id);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		}
+		
+		// Declare this member of the list
+		{ 
 			char buffer[512];
 			char * debug_info_str = iter->debug_info();
 			defer { free(debug_info_str); };
@@ -224,20 +243,35 @@ void AST_Node::graph_viz_repr(FILE * file)
 				iter->debug_id, debug_info_str);
 			fwrite(buffer, sizeof(char), strlen(buffer), file);
 		}
+		
+		// Declare the connection to the next member of the list
 		if (iter->next != NULL) {
 			char buffer[512];
 			sprintf(buffer, "\"%d\" -> \"%d\"\n",
 				iter->debug_id, iter->next->debug_id);
 			fwrite(buffer, sizeof(char), strlen(buffer), file);
-		}
-		group_ids.push(iter->debug_id);
-		if (iter->type == AST_LIST) {
+		} else {
 			char buffer[512];
-			sprintf(buffer, "\"%d\" -> \"%d\"\n",
-				iter->debug_id, iter->list_head->debug_id);
+			sprintf(buffer, "\"%d\" -> \"%d\"\n", iter->debug_id, iter->next_nil_id);
 			fwrite(buffer, sizeof(char), strlen(buffer), file);
-			iter->list_head->graph_viz_repr(file);
 		}
+
+		// Declare the connection to children if this is a list
+		if (iter->type == AST_LIST) {
+			if (iter->list_head == NULL) {
+				char buffer[512];
+				sprintf(buffer, "\"%d\" -> \"%d\"\n",
+					iter->debug_id, iter->child_nil_id);
+				fwrite(buffer, sizeof(char), strlen(buffer), file);
+			} else {
+				char buffer[512];
+				sprintf(buffer, "\"%d\" -> \"%d\"\n",
+					iter->debug_id, iter->list_head->debug_id);
+				fwrite(buffer, sizeof(char), strlen(buffer), file);
+				iter->list_head->graph_viz_repr(file);
+			}
+		}
+		
 		iter = iter->next;
 	}
 	String_Builder group_builder;
@@ -251,24 +285,6 @@ void AST_Node::graph_viz_repr(FILE * file)
 	group_builder.prepend("{ rank=same; ");
 	group_builder.append ("}\n");
 	fwrite(group_builder.str(), sizeof(char), strlen(group_builder.str()), file);
-}
-
-char * AST_Node::graph_viz_groups()
-{
-	String_Builder builder;
-	builder.alloc();
-	defer { builder.dealloc(); };
-	{
-		char buffer[512];
-		sprintf(buffer, "%d ", debug_id);
-		builder.append(buffer);
-	}
-	if (next != NULL) {
-		char * next_groups = next->graph_viz_groups();
-		builder.append(next_groups);
-		free(next_groups);
-	}
-	return builder.final_str();
 }
 
 struct Parser {
@@ -341,12 +357,10 @@ void output_graph_viz_repr_to_file(AST_Node * root)
 	system("python3 view_graph.py");
 }
 
-AST_Node * get_ast(char * file_path, bool visualize)
+AST_Node * get_ast(char * source, bool visualize)
 {	
 	List<Token> tokens;
 	{
-		char * source = load_string_from_file(file_path);
-		defer { free(source); };
 		Lexer lexer;
 		lexer.init(source);
 		tokens = lexer.lex();

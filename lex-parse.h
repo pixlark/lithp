@@ -22,7 +22,12 @@ struct AST_Node {
 		char * identifier;
 		int literal;
 	};
+	
+	// Debugging stuff
 	int debug_id;
+	int next_nil_id;
+	int child_nil_id;
+	//
 
 	void init(AST_Type type);
 	void list_add_child(AST_Node * child);
