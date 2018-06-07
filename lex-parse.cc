@@ -330,7 +330,7 @@ AST_Node * Parser::parse()
 
 void output_graph_viz_repr_to_file(AST_Node * root)
 {	
-	FILE * repr_file = fopen("graph.viz", "w");
+	FILE * repr_file = fopen("graph.dot", "w");
 
 	fwrite("digraph G {\n", sizeof(char), strlen("digraph G {\n"), repr_file);
 	root->graph_viz_repr(repr_file);
