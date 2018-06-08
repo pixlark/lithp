@@ -3,6 +3,7 @@
 enum Token_Type {
 	TOKEN_OPEN_PAREN,
 	TOKEN_CLOSE_PAREN,
+	TOKEN_T,
 	TOKEN_IDENTIFIER,
 	TOKEN_LITERAL,
 };
@@ -33,6 +34,9 @@ void print_token(Token token)
 		break;
 	case TOKEN_LITERAL:
 		printf("Literal: %d", token.data.literal);
+		break;
+	case TOKEN_T:
+		printf("Boolean True");
 		break;
 	}
 }
@@ -132,7 +136,11 @@ List<Token> Lexer::lex()
 			consume();
 		} else {
 			char * word = read_word();
-			if (is_int_literal(word)) {
+			if (strcmp(word, "T") == 0) {
+				Token t(TOKEN_T);
+				free(word);
+				tokens.push(t);
+			} else if (is_int_literal(word)) {
 				Token t(TOKEN_LITERAL);
 				t.data.literal = atoi(word);
 				free(word);
@@ -149,13 +157,23 @@ List<Token> Lexer::lex()
 
 int next_debug_id() { static int i = 1000; return i++; }
 
-void AST_Node::init(AST_Type type)
+char * ast_type_string[] = {
+	"Identifier",
+	"Literal",
+	"List",
+	"T",
+};
+
+void AST_Node::init(AST_Type type, bool root_node)
 {
 	this->type = type;
 	next = NULL;
+	// debug stuff
+	this->root_node = root_node;
 	debug_id     = next_debug_id();
 	next_nil_id  = next_debug_id();
 	child_nil_id = next_debug_id();
+	//
 	switch (type) {
 	case AST_LIST:
 		list_head = NULL;
@@ -187,9 +205,15 @@ char * AST_Node::debug_info()
 {
 	switch (type) {
 	case AST_LIST: {
-		char * str = (char*) malloc(strlen("list") + 1);
-		strcpy(str, "list");
-		return str;
+		if (root_node) {
+			char * str = (char*) malloc(strlen("ROOT") + 1);
+			strcpy(str, "ROOT");
+			return str;
+		} else {
+			char * str = (char*) malloc(strlen("list") + 1);
+			strcpy(str, "list");
+			return str;
+		}
 	}
 	case AST_IDENT: {
 		char buffer[512];
@@ -205,6 +229,11 @@ char * AST_Node::debug_info()
 		char * str = (char*) malloc(strlen(buffer) + 1);
 		str[strlen(buffer)] = '\0';
 		for (int i = 0; i < strlen(buffer); i++) str[i] = buffer[i];
+		return str;
+	}
+	case AST_T: {
+		char * str = (char*) malloc(2);
+		strcpy(str, "T");
 		return str;
 	}
 	}
@@ -287,6 +316,13 @@ void AST_Node::graph_viz_repr(FILE * file)
 	fwrite(group_builder.str(), sizeof(char), strlen(group_builder.str()), file);
 }
 
+AST_Node * alloc_node(AST_Type type)
+{
+	AST_Node * node = (AST_Node*) malloc(sizeof(AST_Node));
+	node->init(type);
+	return node;
+}
+
 struct Parser {
 	Token * tokens;
 	int tokens_len;
@@ -318,20 +354,17 @@ Token * Parser::consume()
 
 AST_Node * Parser::parse()
 {
-	AST_Node * parent_list = (AST_Node*) malloc(sizeof(AST_Node));
-	parent_list->init(AST_LIST);
+	AST_Node * parent_list = alloc_node(AST_LIST);
 	while (1) {
 		Token * token = consume();
 		if (token == NULL) {
 			break;
 		} else if (token->type == TOKEN_IDENTIFIER) {
-			AST_Node * ident_node = (AST_Node*) malloc(sizeof(AST_Node));
-			ident_node->init(AST_IDENT);
+			AST_Node * ident_node = alloc_node(AST_IDENT);
 			ident_node->identifier = token->data.identifier;
 			parent_list->list_add_child(ident_node);
 		} else if (token->type == TOKEN_LITERAL) {
-			AST_Node * literal_node = (AST_Node*) malloc(sizeof(AST_Node));
-			literal_node->init(AST_LITERAL);
+			AST_Node * literal_node = alloc_node(AST_LITERAL);
 			literal_node->literal = token->data.literal;
 			parent_list->list_add_child(literal_node);
 		} else if (token->type == TOKEN_OPEN_PAREN) {
@@ -339,12 +372,35 @@ AST_Node * Parser::parse()
 			parent_list->list_add_child(list_node);
 		} else if (token->type == TOKEN_CLOSE_PAREN) {
 			break;
+		} else if (token->type == TOKEN_T) {
+			AST_Node * t_node = alloc_node(AST_T);
+			parent_list->list_add_child(t_node);
 		}
 	}
 	return parent_list;
 }
 
-void output_graph_viz_repr_to_file(AST_Node * root)
+void print_ast_as_lisp(AST_Node * root)
+{
+	if (root->type == AST_LIST) {
+		printf("(");
+		AST_Node * iter = root->list_head;
+		while (iter != NULL) {
+			print_ast_as_lisp(iter);
+			if (iter->next != NULL) printf(" ");
+			iter = iter->next;
+		}
+		printf(")");
+	} else if (root->type == AST_LITERAL) {
+		printf("%d", root->literal);
+	} else if (root->type == AST_IDENT) {
+		printf("%s", root->identifier);
+	} else if (root->type == AST_T) {
+		printf("T");
+	}
+}
+
+void write_gvr_and_view(AST_Node * root)
 {	
 	FILE * repr_file = fopen("graph.dot", "w");
 
@@ -357,7 +413,7 @@ void output_graph_viz_repr_to_file(AST_Node * root)
 	system("python3 view_graph.py");
 }
 
-AST_Node * get_ast(char * source, bool visualize)
+AST_Node * get_ast(char * source)
 {	
 	List<Token> tokens;
 	{
@@ -367,19 +423,17 @@ AST_Node * get_ast(char * source, bool visualize)
 	}
 
 	for (int i = 0; i < tokens.len; i++) {
-		print_token(tokens[i]);
-		printf("\n");
+		//print_token(tokens[i]);
+		//printf("\n");
 	}
 
 	AST_Node * root;
 	{
 		Parser parser;
 		parser.init(tokens.arr, tokens.len);
-		assert(parser.consume()->type == TOKEN_OPEN_PAREN); // HACK
 		root = parser.parse();
+		root->root_node = true;
 	}
-
-	if (visualize) output_graph_viz_repr_to_file(root);
 	
-	return 0;
+	return root;
 }
