@@ -202,6 +202,11 @@ void Lisp_VM::init()
 	nil->_debug_tag = "NIL";
 }
 
+Cell * Lisp_VM::apply_function(Cell * to_call, Cell * arguments)
+{
+	
+}
+
 Cell * Lisp_VM::evaluate(Cell * cell)
 {
 	if (cell->cell_type == CELL_NUMBER) {
@@ -216,6 +221,7 @@ Cell * Lisp_VM::evaluate(Cell * cell)
 		return resolved;
 	} else if (cell->cell_type == CELL_CONS) {
 		if (cell == this->nil) return cell;
+		return apply_function(cell->cons.car, cell->cons.cdr);
 	}
 	return NULL;
 }

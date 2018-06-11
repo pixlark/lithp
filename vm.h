@@ -28,6 +28,7 @@ struct Lisp_VM {
 
 	void   init();
 	Cell * evaluate(Cell * cell);
+	Cell * apply_function(Cell * to_call, Cell * arguments);
 };
 
 Cell * alloc_cell();
