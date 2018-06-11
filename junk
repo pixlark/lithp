@@ -1,0 +1,125 @@
+#if 0
+int next_debug_id() { static int i = 1000; return i++; }
+
+void AST_Node::graph_viz_repr(FILE * file)
+{
+	List<int> group_ids;
+	group_ids.alloc();
+	defer { group_ids.dealloc(); };
+	AST_Node * iter = this;
+	while (iter != NULL) {
+		group_ids.push(iter->debug_id);
+		
+		// Declare nil if the next member of the list is nil
+		if (iter->next == NULL) {
+			group_ids.push(iter->next_nil_id);
+			char buffer[512];
+			sprintf(buffer, "\"%d\" [label=\"NIL\"]\n", iter->next_nil_id);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		}
+		// Declare nil if this is a list and the child is nil
+		if (iter->type == AST_LIST && iter->list_head == NULL) {
+			char buffer[512];
+			sprintf(buffer, "\"%d\" [label=\"NIL\"]\n", iter->child_nil_id);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		}
+		
+		// Declare this member of the list
+		{ 
+			char buffer[512];
+			char * debug_info_str = iter->debug_info();
+			defer { free(debug_info_str); };
+			sprintf(
+				buffer, "\"%d\" [label=\"%s\"]\n",
+				iter->debug_id, debug_info_str);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		}
+		
+		// Declare the connection to the next member of the list
+		if (iter->next != NULL) {
+			char buffer[512];
+			sprintf(buffer, "\"%d\" -> \"%d\"\n",
+				iter->debug_id, iter->next->debug_id);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		} else {
+			char buffer[512];
+			sprintf(buffer, "\"%d\" -> \"%d\"\n", iter->debug_id, iter->next_nil_id);
+			fwrite(buffer, sizeof(char), strlen(buffer), file);
+		}
+
+		// Declare the connection to children if this is a list
+		if (iter->type == AST_LIST) {
+			if (iter->list_head == NULL) {
+				char buffer[512];
+				sprintf(buffer, "\"%d\" -> \"%d\"\n",
+					iter->debug_id, iter->child_nil_id);
+				fwrite(buffer, sizeof(char), strlen(buffer), file);
+			} else {
+				char buffer[512];
+				sprintf(buffer, "\"%d\" -> \"%d\"\n",
+					iter->debug_id, iter->list_head->debug_id);
+				fwrite(buffer, sizeof(char), strlen(buffer), file);
+				iter->list_head->graph_viz_repr(file);
+			}
+		}
+		
+		iter = iter->next;
+	}
+	String_Builder group_builder;
+	group_builder.alloc();
+	defer { group_builder.dealloc(); };
+	for (int i = 0; i < group_ids.len; i++) {
+		char buffer[512];
+		sprintf(buffer, "\"%d\" ", group_ids[i]);
+		group_builder.append(buffer);
+	}
+	group_builder.prepend("{ rank=same; ");
+	group_builder.append ("}\n");
+	fwrite(group_builder.str(), sizeof(char), strlen(group_builder.str()), file);
+}
+
+void write_gvr_and_view(AST_Node * root)
+{	
+	FILE * repr_file = fopen("graph.dot", "w");
+
+	fwrite("digraph G {\n", sizeof(char), strlen("digraph G {\n"), repr_file);
+	root->graph_viz_repr(repr_file);
+	fwrite("}\n", sizeof(char), strlen("}\n"), repr_file);
+
+	fclose(repr_file);
+
+	system("python3 view_graph.py");
+}
+#endif
+
+Cons * node_copy(Cons * node)
+{
+	Cons * copy = (Cons*) malloc(sizeof(Cons));
+	copy->type = node->type;
+	if (node->type == NODE_ATOM) {
+		copy->atom = node->atom;
+	} else {
+		copy->list = node->list;
+	}
+	copy->next = node->next;
+}
+
+Cons * node_copy_independent(Cons * node)
+{
+	Cons * copy = node_copy(node);
+	copy->next = alloc_list();
+	copy = node_deep_copy(copy);
+	return copy;
+}
+
+Cons * node_deep_copy(Cons * node)
+{
+	Cons * copy = node_copy(node);
+	if (copy->type != NODE_NIL) {
+		copy->next = node_deep_copy(copy->next);
+	}
+	if (copy->type == NODE_LIST) {
+		copy->list = node_deep_copy(copy->list);
+	}
+	return copy;
+}
