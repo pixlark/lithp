@@ -11,16 +11,19 @@ bool string_in_list(char ** list, int list_len, char * str)
 	return false;
 }
 
-#define SPECIAL_FORM_COUNT 2
+#define SPECIAL_FORM_COUNT 5
 char * special_forms[SPECIAL_FORM_COUNT] = {
+	"set",
 	"if",
 	"=",
+	"+",
+	"*",
 };
 
 int hash_str(char * key, int table_size)
 {
 	// TODO(pixlark): Better algorithm
-	int acc;
+	int acc = 0;
 	while (*key != '\0') acc += *(key++);
 	return acc % table_size;
 }
@@ -59,6 +62,29 @@ Cell * list_index(Lisp_VM * vm, Cell * start, int index)
 	assert(start->cell_type == CELL_CONS);
 	if (index == 0) return start;
 	else return list_index(vm, start->cons.cdr, index - 1);
+}
+
+Cell * deep_copy_cell(Lisp_VM * vm, Cell * to_copy)
+{
+	if (to_copy == vm->nil)   return vm->nil;
+	if (to_copy == vm->truth) return vm->truth;
+	Cell * copy = alloc_cell();
+	copy->cell_type = to_copy->cell_type;
+	// Could probably do a direct bit-by-bit copy of the union here?
+	switch (to_copy->cell_type) {
+	case CELL_SYMBOL:
+		copy->symbol = to_copy->symbol;
+		break;
+	case CELL_NUMBER:
+		copy->number = to_copy->number;
+		break;
+	case CELL_CONS:
+		copy->cons.car = deep_copy_cell(vm, to_copy->cons.car);
+		copy->cons.cdr = deep_copy_cell(vm, to_copy->cons.cdr);
+		break;
+	}
+	copy->_debug_tag = "COPY";
+	return copy;
 }
 
 void print_cell_as_lisp(Lisp_VM * vm, Cell * cell, bool first_cons)
@@ -108,16 +134,26 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 	assert(form->cell_type == CELL_SYMBOL);
 	assert(arguments->cell_type == CELL_CONS);
 	char * symbol = form->symbol;
-	if (strcmp(symbol, "if") == 0) {
+	if (strcmp(symbol, "set") == 0) {
+		if (list_length(this, arguments) != 2) {
+			printf("set takes two arguments");
+		}
+		assert(list_index(this, arguments, 0)->cons.car->cell_type == CELL_SYMBOL);
+		char * bind_symbol = list_index(this, arguments, 0)->cons.car->symbol;
+		Cell * bind_cell   =
+			deep_copy_cell(this, list_index(this, arguments, 1)->cons.car);
+		bindings.insert(bind_symbol, bind_cell);
+		return bind_cell;
+	} else if (strcmp(symbol, "if") == 0) {
 		if (list_length(this, arguments) != 3) {
 			printf("if takes three arguments.\n");
 			return NULL;
 		}
 		Cell * condition = evaluate(list_index(this, arguments, 0)->cons.car);
 		if (condition == truth) {
-			return list_index(this, arguments, 1)->cons.car;
+			return evaluate(list_index(this, arguments, 1)->cons.car);
 		} else if (condition == nil) {
-			return list_index(this, arguments, 2)->cons.car;
+			return evaluate(list_index(this, arguments, 2)->cons.car);
 		} else {
 			printf("if condition didn't resolve to T or NIL.\n");
 			return NULL;
@@ -137,13 +173,93 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 		} else {
 			return nil;
 		}
+	} else if (strcmp(symbol, "+") == 0) {
+		if (list_length(this, arguments) != 2) {
+			printf("+ takes two arguments.\n");
+			return NULL;
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
+		if (a == NULL || b == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		assert(b->cell_type == CELL_NUMBER);
+		Cell * ret = alloc_cell();
+		ret->cell_type = CELL_NUMBER;
+		ret->number = a->number + b->number;
+		return ret;
+	} else if (strcmp(symbol, "*") == 0) {
+		if (list_length(this, arguments) != 2) {
+			printf("* takes two arguments.\n");
+			return NULL;
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
+		if (a == NULL || b == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		assert(b->cell_type == CELL_NUMBER);
+		Cell * ret = alloc_cell();
+		ret->cell_type = CELL_NUMBER;
+		ret->number = a->number * b->number;
+		return ret;
 	}
 	return NULL;
 }
 
+void Lisp_VM::substitute_arguments(Cell * procedure, char * param, Cell * arg)
+{
+	assert(procedure->cell_type == CELL_CONS);
+	switch (procedure->cons.car->cell_type) {
+	case CELL_CONS:
+		substitute_arguments(procedure->cons.car, param, arg);
+		break;
+	case CELL_SYMBOL:
+		if (strcmp(procedure->cons.car->symbol, param) == 0) {
+			procedure->cons.car = deep_copy_cell(this, arg);
+		}
+		break;
+	default:
+		break;
+	}
+	if (procedure->cons.cdr != nil) {
+		substitute_arguments(procedure->cons.cdr, param, arg);
+	}
+}
+
 Cell * Lisp_VM::apply_function(Cell * to_call, Cell * arguments)
 {
-	return NULL;
+	/* 1. Copy procedure tree
+	 * 2. Substitute arguments in procedure tree
+	 * 3. Substitute function with their recursively
+     *    applied bodies
+	 * 4. Evaluate
+	 */
+	assert(to_call->cell_type == CELL_CONS);
+	assert(to_call->cons.car->cell_type == CELL_SYMBOL);
+	assert(strcmp(to_call->cons.car->symbol, "lambda") == 0);
+	Cell * lambda = deep_copy_cell(this, to_call);
+	Cell * procedure = lambda->cons.cdr->cons.cdr->cons.car;
+	
+	Cell * params = lambda->cons.cdr->cons.car;
+	Cell * args   = arguments;
+
+	assert(list_length(this, params) == list_length(this, args));
+	
+	for (int i = 0; i < list_length(this, params); i++) {
+		Cell * param_cons = list_index(this, params, i);
+		assert(param_cons->cell_type == CELL_CONS);
+		assert(param_cons->cons.car->cell_type == CELL_SYMBOL);
+		char * param = param_cons->cons.car->symbol;
+		
+		Cell * arg_cons = list_index(this, args, i);
+		assert(arg_cons->cell_type == CELL_CONS);
+		Cell * arg = deep_copy_cell(this, evaluate(arg_cons->cons.car));
+
+		substitute_arguments(procedure, param, arg);
+	}
+
+	Cell * resolved = evaluate(procedure);
+	
+	return resolved;
 }
 
 Cell * Lisp_VM::evaluate(Cell * cell)
@@ -159,34 +275,40 @@ Cell * Lisp_VM::evaluate(Cell * cell)
 		bindings.index(cell->symbol, &resolved);
 		return resolved;
 	} else if (cell->cell_type == CELL_CONS) {
-		if (cell == this->nil) return cell;
-		assert(cell->cons.car->cell_type == CELL_SYMBOL);
-		if (string_in_list(
-				special_forms,
-				SPECIAL_FORM_COUNT,
-				cell->cons.car->symbol)) {
-			return special_form(cell->cons.car, cell->cons.cdr);
+		if (cell == nil) return nil;
+		// Check for special forms
+		if (cell->cons.car->cell_type == CELL_SYMBOL) {
+			if (string_in_list(
+					special_forms,
+					SPECIAL_FORM_COUNT,
+					cell->cons.car->symbol)) {
+				return special_form(cell->cons.car, cell->cons.cdr);
+			}
 		}
-		return apply_function(cell->cons.car, cell->cons.cdr);
+		// Evaluate head and apply to body
+		Cell * head = evaluate(cell->cons.car);
+		if (head == NULL) return NULL;
+		return apply_function(head, cell->cons.cdr);
 	}
 	return NULL;
 }
 
 int main()
 {
-	Lisp_VM vm;
-	vm.init();
+	Lisp_VM __vm;
+	Lisp_VM * vm = &__vm;
+	vm->init();
 	
 	while (1) {
 		printf("$ ");
 		char source_buffer[512];
 		fgets(source_buffer, 512, stdin);
 		if (strcmp(source_buffer, "(quit)\n") == 0) break;
-		Cell * parsed = parse_source(&vm, source_buffer);
-		while (parsed != vm.nil) {
-			Cell * evaluated = vm.evaluate(parsed->cons.car);
+		Cell * parsed = parse_source(vm, source_buffer);
+		while (parsed != vm->nil) {
+			Cell * evaluated = vm->evaluate(parsed->cons.car);
 			if (evaluated != NULL) {
-				print_cell_as_lisp(&vm, evaluated);
+				print_cell_as_lisp(vm, evaluated);
 				printf("\n");
 			}
 			parsed = parsed->cons.cdr;

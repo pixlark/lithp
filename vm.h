@@ -31,6 +31,7 @@ struct Lisp_VM {
 	Cell * evaluate(Cell * cell);
 	Cell * special_form(Cell * form, Cell * arguments);
 	Cell * apply_function(Cell * to_call, Cell * arguments);
+	void substitute_arguments(Cell * procedure, char * param, Cell * arg);
 };
 
 Cell * alloc_cell();
@@ -39,5 +40,7 @@ void print_cell_as_lisp(Lisp_VM * vm, Cell * cell, bool first_cons = true);
 Cell * cell_push(Lisp_VM * vm, Cell * cell, Cell * to_push);
 int    list_length(Lisp_VM * vm, Cell * cell);
 Cell * list_index(Lisp_VM * vm, Cell * start, int index);
+
+Cell * deep_copy_cell(Lisp_VM * vm, Cell * to_copy);
 
 #endif
