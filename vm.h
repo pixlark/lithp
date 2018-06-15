@@ -24,15 +24,20 @@ struct Cell {
 
 struct Lisp_VM {
 	HashTable<char*, Cell*> bindings;
+	Cell * truth;
 	Cell * nil;
 
 	void   init();
 	Cell * evaluate(Cell * cell);
+	Cell * special_form(Cell * form, Cell * arguments);
 	Cell * apply_function(Cell * to_call, Cell * arguments);
 };
 
 Cell * alloc_cell();
 void print_cell_as_lisp(Lisp_VM * vm, Cell * cell, bool first_cons = true);
+
 Cell * cell_push(Lisp_VM * vm, Cell * cell, Cell * to_push);
+int    list_length(Lisp_VM * vm, Cell * cell);
+Cell * list_index(Lisp_VM * vm, Cell * start, int index);
 
 #endif

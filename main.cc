@@ -3,137 +3,19 @@
 #define DS_UTIL_IMPLEMENTATION
 #include "ds_util.h"
 
-#if 0
-struct Lisp_VM {
-	HashTable<char*, Cons*> bindings;
+bool string_in_list(char ** list, int list_len, char * str)
+{
+	for (int i = 0; i < list_len; i++) {
+		if (strcmp(list[i], str) == 0) return true;
+	}
+	return false;
+}
 
-	void        init();
-	Cons * apply_function(Function function, Cons * arguments);
-	Cons * evaluate(Cons * list);
+#define SPECIAL_FORM_COUNT 2
+char * special_forms[SPECIAL_FORM_COUNT] = {
+	"if",
+	"=",
 };
-
-void Lisp_VM::init()
-{
-	bindings.init(100, hash_str, hash_str_comp);
-}
-
-Cons * substitute_arguments(Cons * procedure, char * symbol, Cons * arg)
-{
-	assert(procedure->type == NODE_LIST);
-	Cons * iter = procedure->list;
-	while (iter != NULL) {
-		if (iter->type == NODE_LIST) {
-			substitute_arguments(iter, symbol, arg);
-		}
-		if (iter->type == NODE_ATOM &&
-			iter->atom.type == ATOM_SYMBOL) {
-			if (strcmp(iter->atom.symbol, symbol) == 0) {
-				Cons * arg_copy = node_deep_copy(arg);
-				Cons * next = iter->next;
-				*iter = *arg_copy;
-				iter->next = next;
-			}
-		}
-		iter = iter->next;
-	}
-}
-
-Cons * Lisp_VM::apply_function(Function function, Cons * arguments)
-{
-	int arg_count = list_length(function.args);
-	assert(arg_count == chain_length(arguments));
-	Cons * procedure = node_deep_copy(function.procedure);
-	for (int i = 0; i < arg_count; i++) {
-		Cons * arg = list_index(function.args, i);
-		assert(arg->type      == NODE_ATOM);
-		assert(arg->atom.type == ATOM_SYMBOL);
-		char * arg_symbol = list_index(function.args, i)->atom.symbol;
-		Cons * replace_arg = chain_index(arguments, i);
-		substitute_arguments(procedure, arg_symbol, replace_arg);
-	}
-	return procedure;
-}
-
-Cons * Lisp_VM::evaluate(Cons * list)
-{
-	// Nil
-	if (list->type == NODE_NIL) {
-		return list;
-	}
-	// Atom
-	if (list->type == NODE_ATOM) {
-		// Numbers and Functions
-		if (list->atom.type == ATOM_NUMBER || list->atom.type == ATOM_FUNCTION) {
-			return list;
-		}
-		// Symbol
-		if (bindings.index(list->atom.symbol, NULL)) {
-			printf("Symbol %s not bound.\n", list->atom.symbol);
-			return NULL;
-		}
-		Cons * node;
-		bindings.index(list->atom.symbol, &node);
-		return node;
-	}
-	// List
-	Cons * head = list->list;
-	if (head->type == NODE_ATOM) {
-		if (head->atom.type == ATOM_SYMBOL) {
-			// Special forms
-			if (strcmp(head->atom.symbol, "quote") == 0) {
-				if (list_length(list) != 2) {
-					printf("Wrong number of arguments to quote.\n");
-					return NULL;
-				}
-				return head->next;
-			} else if (strcmp(head->atom.symbol, "lambda") == 0) {
-				if (list_length(list) != 3) {
-					printf("Wrong number of arguments to lambda.\n");
-					return NULL;
-				}
-				Cons * function = alloc_atom();
-				function->atom.type = ATOM_FUNCTION;
-				assert(head->next->type == NODE_LIST);
-				function->atom.function.args = node_copy_independent(head->next);
-				assert(head->next->next->type == NODE_LIST);
-				function->atom.function.procedure = node_copy_independent(head->next->next);
-				return function;
-			} else if (strcmp(head->atom.symbol, "define") == 0) {
-				if (list_length(list) != 3) {
-					printf("Wrong number of arguments to define.\n");
-					return NULL;
-				}
-				assert(head->next->atom.type == ATOM_SYMBOL);
-				Cons * copy = node_copy_independent(head->next->next);
-				copy = evaluate(copy);
-				if (copy == NULL) return NULL;
-				bindings.insert(head->next->atom.symbol, copy);
-				return copy;
-			} else if (strcmp(head->atom.symbol, "*") == 0) {
-				if (list_length(list) != 3) {
-					printf("Wrong number of arguments to *.\n");
-					return NULL;
-				}
-				Cons * ret = node_copy_independent(head->next);
-				ret->atom.number *= head->next->next->atom.number;
-				return ret;
-			} else {
-				// Lookup function
-				Cons * resolved = evaluate(head);
-				if (resolved->atom.type != ATOM_FUNCTION) {
-					printf("Can't apply as function.\n");
-					return NULL;
-				}
-				// Apply function
-				Cons * applied = apply_function(resolved->atom.function, head->next);
-				return applied;
-			}
-		}
-	}
-	printf("Unimplemented.\n");
-	return NULL;
-}
-#endif
 
 int hash_str(char * key, int table_size)
 {
@@ -165,6 +47,20 @@ Cell * cell_push(Lisp_VM * vm, Cell * cell, Cell * to_push)
 	}
 }
 
+int list_length(Lisp_VM * vm, Cell * cell)
+{
+	assert(cell->cell_type == CELL_CONS);
+	if (cell == vm->nil) return 0;
+	else return 1 + list_length(vm, cell->cons.cdr);
+}
+
+Cell * list_index(Lisp_VM * vm, Cell * start, int index)
+{
+	assert(start->cell_type == CELL_CONS);
+	if (index == 0) return start;
+	else return list_index(vm, start->cons.cdr, index - 1);
+}
+
 void print_cell_as_lisp(Lisp_VM * vm, Cell * cell, bool first_cons)
 {
 	if (cell == vm->nil) {
@@ -194,17 +90,60 @@ Cell * alloc_cell()
 void Lisp_VM::init()
 {
 	bindings.init(100, hash_str, hash_str_comp);
-	// Nil
+	// NIL
 	nil = alloc_cell();
 	nil->cell_type = CELL_CONS;
 	nil->cons.car  = nil;
 	nil->cons.cdr  = nil;
 	nil->_debug_tag = "NIL";
+	// T
+	truth = alloc_cell();
+	truth->cell_type = CELL_SYMBOL;
+	truth->symbol = "T";
+	truth->_debug_tag = "T";
+}
+
+Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
+{
+	assert(form->cell_type == CELL_SYMBOL);
+	assert(arguments->cell_type == CELL_CONS);
+	char * symbol = form->symbol;
+	if (strcmp(symbol, "if") == 0) {
+		if (list_length(this, arguments) != 3) {
+			printf("if takes three arguments.\n");
+			return NULL;
+		}
+		Cell * condition = evaluate(list_index(this, arguments, 0)->cons.car);
+		if (condition == truth) {
+			return list_index(this, arguments, 1)->cons.car;
+		} else if (condition == nil) {
+			return list_index(this, arguments, 2)->cons.car;
+		} else {
+			printf("if condition didn't resolve to T or NIL.\n");
+			return NULL;
+		}
+	} else if (strcmp(symbol, "=") == 0) {
+		if (list_length(this, arguments) != 2) {
+			printf("= takes two arguments.\n");
+			return NULL;
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
+		if (a == NULL || b == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		assert(b->cell_type == CELL_NUMBER);
+		if (a->number == b->number) {
+			return truth;
+		} else {
+			return nil;
+		}
+	}
+	return NULL;
 }
 
 Cell * Lisp_VM::apply_function(Cell * to_call, Cell * arguments)
 {
-	
+	return NULL;
 }
 
 Cell * Lisp_VM::evaluate(Cell * cell)
@@ -221,6 +160,13 @@ Cell * Lisp_VM::evaluate(Cell * cell)
 		return resolved;
 	} else if (cell->cell_type == CELL_CONS) {
 		if (cell == this->nil) return cell;
+		assert(cell->cons.car->cell_type == CELL_SYMBOL);
+		if (string_in_list(
+				special_forms,
+				SPECIAL_FORM_COUNT,
+				cell->cons.car->symbol)) {
+			return special_form(cell->cons.car, cell->cons.cdr);
+		}
 		return apply_function(cell->cons.car, cell->cons.cdr);
 	}
 	return NULL;

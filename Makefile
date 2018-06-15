@@ -1,2 +1,2 @@
 make:
-	g++ -g main.cc lex-parse.cc -o lithp -Wno-write-strings
+	g++ -std=c++11 -g main.cc lex-parse.cc -o _lithp -Wno-write-strings
