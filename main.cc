@@ -150,10 +150,16 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 			return NULL;
 		}
 		Cell * condition = evaluate(list_index(this, arguments, 0)->cons.car);
-		if (condition == truth) {
-			return evaluate(list_index(this, arguments, 1)->cons.car);
+		if (condition == NULL) {
+			return NULL;
+		} else if (condition == truth) {
+			Cell * ret = evaluate(list_index(this, arguments, 1)->cons.car);
+			if (ret == NULL) return NULL;
+			return NULL;
 		} else if (condition == nil) {
-			return evaluate(list_index(this, arguments, 2)->cons.car);
+			Cell * ret = evaluate(list_index(this, arguments, 2)->cons.car);
+			if (ret == NULL) return NULL;
+			return NULL;
 		} else {
 			printf("if condition didn't resolve to T or NIL.\n");
 			return NULL;
@@ -236,6 +242,7 @@ Cell * Lisp_VM::apply_function(Cell * to_call, Cell * arguments)
 	assert(to_call->cell_type == CELL_CONS);
 	assert(to_call->cons.car->cell_type == CELL_SYMBOL);
 	assert(strcmp(to_call->cons.car->symbol, "lambda") == 0);
+	
 	Cell * lambda = deep_copy_cell(this, to_call);
 	Cell * procedure = lambda->cons.cdr->cons.cdr->cons.car;
 	
@@ -243,7 +250,6 @@ Cell * Lisp_VM::apply_function(Cell * to_call, Cell * arguments)
 	Cell * args   = arguments;
 
 	assert(list_length(this, params) == list_length(this, args));
-	
 	for (int i = 0; i < list_length(this, params); i++) {
 		Cell * param_cons = list_index(this, params, i);
 		assert(param_cons->cell_type == CELL_CONS);
@@ -252,12 +258,16 @@ Cell * Lisp_VM::apply_function(Cell * to_call, Cell * arguments)
 		
 		Cell * arg_cons = list_index(this, args, i);
 		assert(arg_cons->cell_type == CELL_CONS);
-		Cell * arg = deep_copy_cell(this, evaluate(arg_cons->cons.car));
+
+		Cell * eval_arg = evaluate(arg_cons->cons.car);
+		if (eval_arg == NULL) return NULL;
+		Cell * arg = deep_copy_cell(this, eval_arg);
 
 		substitute_arguments(procedure, param, arg);
 	}
-
+	
 	Cell * resolved = evaluate(procedure);
+	if (resolved == NULL) return NULL;
 	
 	return resolved;
 }
