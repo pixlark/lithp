@@ -1,0 +1,7 @@
+Replace all assertions that can be reached by the user with some sort
+of exception system.
+---------------------------
+Macros
+---------------------------
+Syntactic sugar for quote
+---------------------------

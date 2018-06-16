@@ -1,6 +1,7 @@
 #ifndef LITHP_VM_H
 #define LITHP_VM_H
 
+#include <stdarg.h>
 #include "ds_util.h"
 
 enum Cell_Type {
@@ -27,11 +28,16 @@ struct Lisp_VM {
 	Cell * truth;
 	Cell * nil;
 
+	char * err_str;
+	bool thrown;
+
 	void   init();
 	Cell * evaluate(Cell * cell);
 	Cell * special_form(Cell * form, Cell * arguments);
 	Cell * apply_function(Cell * to_call, Cell * arguments);
 	void substitute_arguments(Cell * procedure, char * param, Cell * arg);
+	Cell * throw_error(char * format, ...); // returns NULL for convenience
+	void display_error();
 };
 
 Cell * alloc_cell();

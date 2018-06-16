@@ -1,3 +1,5 @@
+#include <math.h>
+
 #include "lex-parse.h"
 
 #define DS_UTIL_IMPLEMENTATION
@@ -11,13 +13,24 @@ bool string_in_list(char ** list, int list_len, char * str)
 	return false;
 }
 
-#define SPECIAL_FORM_COUNT 5
+#define SPECIAL_FORM_COUNT 13
 char * special_forms[SPECIAL_FORM_COUNT] = {
+	// Essential
 	"set",
+	"quote",
 	"if",
 	"=",
+	"progn",
+	// Builtin math
 	"+",
+	"-",
 	"*",
+	"/",
+	"%",
+	"mod",
+	"sqrt",
+	// I/O
+	"print",
 };
 
 int hash_str(char * key, int table_size)
@@ -115,6 +128,9 @@ Cell * alloc_cell()
 
 void Lisp_VM::init()
 {
+	// Error handling
+	thrown = false;
+	// Bindings
 	bindings.init(100, hash_str, hash_str_comp);
 	// NIL
 	nil = alloc_cell();
@@ -136,7 +152,7 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 	char * symbol = form->symbol;
 	if (strcmp(symbol, "set") == 0) {
 		if (list_length(this, arguments) != 2) {
-			printf("set takes two arguments");
+			return throw_error("set takes two arguments.\n");
 		}
 		assert(list_index(this, arguments, 0)->cons.car->cell_type == CELL_SYMBOL);
 		char * bind_symbol = list_index(this, arguments, 0)->cons.car->symbol;
@@ -144,10 +160,14 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 			deep_copy_cell(this, list_index(this, arguments, 1)->cons.car);
 		bindings.insert(bind_symbol, bind_cell);
 		return bind_cell;
+	} else if (strcmp(symbol, "quote") == 0) {
+		if (list_length(this, arguments) != 1) {
+			return throw_error("quote takes one argument.\n");
+		}
+		return list_index(this, arguments, 0)->cons.car;
 	} else if (strcmp(symbol, "if") == 0) {
 		if (list_length(this, arguments) != 3) {
-			printf("if takes three arguments.\n");
-			return NULL;
+			return throw_error("if takes three arguments.\n");
 		}
 		Cell * condition = evaluate(list_index(this, arguments, 0)->cons.car);
 		if (condition == NULL) {
@@ -155,19 +175,17 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 		} else if (condition == truth) {
 			Cell * ret = evaluate(list_index(this, arguments, 1)->cons.car);
 			if (ret == NULL) return NULL;
-			return NULL;
+			return ret;
 		} else if (condition == nil) {
 			Cell * ret = evaluate(list_index(this, arguments, 2)->cons.car);
 			if (ret == NULL) return NULL;
-			return NULL;
+			return ret;
 		} else {
-			printf("if condition didn't resolve to T or NIL.\n");
-			return NULL;
+			return throw_error("if condition didn't resolve to T or NIL.\n");
 		}
 	} else if (strcmp(symbol, "=") == 0) {
 		if (list_length(this, arguments) != 2) {
-			printf("= takes two arguments.\n");
-			return NULL;
+			return throw_error("= takes two arguments.\n");
 		}
 		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
 		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
@@ -179,10 +197,18 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 		} else {
 			return nil;
 		}
+	} else if (strcmp(symbol, "progn") == 0) {
+		int arg_count = list_length(this, arguments);
+		Cell * ret;
+		for (int i = 0; i < arg_count; i++) {
+			Cell * arg = list_index(this, arguments, i)->cons.car;
+			ret = evaluate(arg);
+			if (ret == NULL) return NULL;
+		}
+		return ret;
 	} else if (strcmp(symbol, "+") == 0) {
 		if (list_length(this, arguments) != 2) {
-			printf("+ takes two arguments.\n");
-			return NULL;
+			return throw_error("+ takes two arguments.\n");
 		}
 		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
 		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
@@ -193,10 +219,22 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 		ret->cell_type = CELL_NUMBER;
 		ret->number = a->number + b->number;
 		return ret;
+	} else if (strcmp(symbol, "-") == 0) {
+		if (list_length(this, arguments) != 2) {
+			return throw_error("+ takes two arguments.\n");
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
+		if (a == NULL || b == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		assert(b->cell_type == CELL_NUMBER);
+		Cell * ret = alloc_cell();
+		ret->cell_type = CELL_NUMBER;
+		ret->number = a->number - b->number;
+		return ret;
 	} else if (strcmp(symbol, "*") == 0) {
 		if (list_length(this, arguments) != 2) {
-			printf("* takes two arguments.\n");
-			return NULL;
+			return throw_error("* takes two arguments.\n");
 		}
 		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
 		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
@@ -207,6 +245,62 @@ Cell * Lisp_VM::special_form(Cell * form, Cell * arguments)
 		ret->cell_type = CELL_NUMBER;
 		ret->number = a->number * b->number;
 		return ret;
+	} else if (strcmp(symbol, "/") == 0) {
+		if (list_length(this, arguments) != 2) {
+			return throw_error("/ takes two arguments.\n");
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
+		if (a == NULL || b == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		assert(b->cell_type == CELL_NUMBER);
+		Cell * ret = alloc_cell();
+		ret->cell_type = CELL_NUMBER;
+		ret->number = a->number / b->number;
+		return ret;
+	} else if (strcmp(symbol, "%") == 0 || strcmp(symbol, "mod") == 0) {
+		if (list_length(this, arguments) != 2) {
+			return throw_error("%/mod takes two arguments.\n");
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		Cell * b = evaluate(list_index(this, arguments, 1)->cons.car);
+		if (a == NULL || b == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		assert(b->cell_type == CELL_NUMBER);
+		Cell * ret = alloc_cell();
+		ret->cell_type = CELL_NUMBER;
+		ret->number = a->number % b->number;
+		return ret;
+	} else if (strcmp(symbol, "sqrt") == 0) {
+		if (list_length(this, arguments) != 1) {
+			return throw_error("sqrt takes two arguments.\n");
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		if (a == NULL) return NULL;
+		assert(a->cell_type == CELL_NUMBER);
+		Cell * ret = alloc_cell();
+		ret->cell_type = CELL_NUMBER;
+		ret->number = sqrt(a->number);
+		return ret;
+	} else if (strcmp(symbol, "print") == 0) {
+		if (list_length(this, arguments) != 1) {
+			return throw_error("print takes one argument.\n");
+		}
+		Cell * a = evaluate(list_index(this, arguments, 0)->cons.car);
+		if (a == NULL) return NULL;
+		switch (a->cell_type) {
+		case CELL_SYMBOL:
+			printf("%s\n", a->symbol);
+			break;
+		case CELL_NUMBER:
+			printf("%d\n", a->number);
+			break;
+		case CELL_CONS:
+			print_cell_as_lisp(this, a);
+			printf("\n");
+			break;
+		}
+		return a;
 	}
 	return NULL;
 }
@@ -303,6 +397,30 @@ Cell * Lisp_VM::evaluate(Cell * cell)
 	return NULL;
 }
 
+Cell * Lisp_VM::throw_error(char * format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	
+	char buffer [1024];
+	vsprintf(buffer, format, args);
+	err_str = (char*) malloc(strlen(buffer) + 1);
+	strcpy(err_str, buffer);
+	
+	va_end(args);
+
+	thrown = true;
+	return NULL;
+}
+
+void Lisp_VM::display_error()
+{
+	if (!thrown) return;
+	printf("%s\n", err_str);
+	free(err_str);
+	thrown = false;
+}
+
 int main(int argc, char ** argv)
 {
 	Lisp_VM __vm;
@@ -335,6 +453,9 @@ int main(int argc, char ** argv)
 			if (evaluated != NULL) {
 				print_cell_as_lisp(vm, evaluated);
 				printf("\n");
+			} else {
+				vm->display_error();
+				printf("Error encountered. Continuing from REPL...\n");
 			}
 			parsed = parsed->cons.cdr;
 		}
