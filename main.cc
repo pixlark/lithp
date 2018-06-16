@@ -293,18 +293,33 @@ Cell * Lisp_VM::evaluate(Cell * cell)
 	return NULL;
 }
 
-int main()
+int main(int argc, char ** argv)
 {
 	Lisp_VM __vm;
 	Lisp_VM * vm = &__vm;
 	vm->init();
+
+	List<char*> start_inputs;
+	start_inputs.alloc();
+	
+	if (argc > 1) {
+		for (int i = 1; i < argc; i++) {
+			start_inputs.push(load_string_from_file(argv[i]));
+		}
+	}
 	
 	while (1) {
-		printf("$ ");
-		char source_buffer[512];
-		fgets(source_buffer, 512, stdin);
-		if (strcmp(source_buffer, "(quit)\n") == 0) break;
-		Cell * parsed = parse_source(vm, source_buffer);
+		char * source;
+		if (start_inputs.len > 0) {
+			source = start_inputs.pop();
+		} else {
+			printf("$ ");
+			char source_buffer[512];
+			fgets(source_buffer, 512, stdin);
+			if (strcmp(source_buffer, "(quit)\n") == 0) break;
+			source = source_buffer;
+		}
+		Cell * parsed = parse_source(vm, source);
 		while (parsed != vm->nil) {
 			Cell * evaluated = vm->evaluate(parsed->cons.car);
 			if (evaluated != NULL) {
